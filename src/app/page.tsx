@@ -343,6 +343,7 @@ export default function HomePage() {
               isPrivacyMode={isPrivacyMode}
               onOpenDetail={handleOpenDetail}
               onAdjustCount={handleAdjustCount}
+              onUpdateStudents={updateStudents}
               appMode={appMode}
             />
           )}
