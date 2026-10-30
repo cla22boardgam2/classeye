@@ -4,7 +4,9 @@ import React, { useState } from 'react';
 import { X, Printer, Calendar, Clock, User } from './icons';
 import { AppSettings, BehaviorRecord, Student, StudentBehaviorCounter } from '@/types';
 import { STANDARD_BEHAVIOR_TAGS } from '@/lib/constants';
-import { formatKoreanDateTime } from '@/lib/timeHelper';
+import { formatKoreanDateTime, getKoreanDateString } from '@/lib/timeHelper';
+
+type PrintRangeFilter = 'recent_5' | 'recent_10' | 'this_month' | 'all';
 
 interface PrintReportModalProps {
   isOpen: boolean;
@@ -28,26 +30,48 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
   const [activeStudentId, setActiveStudentId] = useState<string>(
     selectedStudent?.id || students[0]?.id || ''
   );
-
-  if (!isOpen) return null;
+  const [rangeFilter, setRangeFilter] = useState<PrintRangeFilter>('recent_5');
 
   const currentStudent = students.find((s) => s.id === activeStudentId) || students[0];
   const currentCounter = counters.find((c) => c.student.id === activeStudentId);
 
-  // Student specific records
-  const studentRecords = records
-    .filter((r) => r.studentId === currentStudent?.id || r.studentNumber === currentStudent?.number)
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  // Student specific records (sorted newest first)
+  const allStudentRecords = React.useMemo(() => {
+    if (!isOpen || !currentStudent) return [];
+    return records
+      .filter((r) => r.studentId === currentStudent.id || r.studentNumber === currentStudent.number)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [isOpen, records, currentStudent]);
+
+  // Filtered records for printing
+  const displayedRecords = React.useMemo(() => {
+    if (rangeFilter === 'recent_5') {
+      return allStudentRecords.slice(0, 5);
+    }
+    if (rangeFilter === 'recent_10') {
+      return allStudentRecords.slice(0, 10);
+    }
+    if (rangeFilter === 'this_month') {
+      const thisMonthPrefix = getKoreanDateString(new Date()).substring(0, 7);
+      return allStudentRecords.filter((r) => getKoreanDateString(r.timestamp).startsWith(thisMonthPrefix));
+    }
+    return allStudentRecords;
+  }, [allStudentRecords, rangeFilter]);
 
   const handlePrint = () => {
     window.print();
   };
 
-  const todayStr = new Date().toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const todayStr = React.useMemo(() => {
+    if (!isOpen) return '';
+    return new Date().toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in print:p-0 print:bg-white">
@@ -95,6 +119,38 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
               <X size={20} />
             </button>
           </div>
+        </div>
+
+        {/* Print Range Optimization Toolbar (Hidden in print) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200 bg-orange-50/70 px-6 py-2.5 text-xs dark:border-orange-950 dark:bg-orange-950/20 print:hidden">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-bold text-orange-950 dark:text-orange-200 mr-1 flex items-center gap-1">
+              📄 인쇄 지면 맞춤 (타임라인 출력 범위):
+            </span>
+            {[
+              { id: 'recent_5', label: '최근 5건 (1장 맞춤)' },
+              { id: 'recent_10', label: '최근 10건 (1~2장 권장)' },
+              { id: 'this_month', label: '이번 달 기록' },
+              { id: 'all', label: `전체 출력 (${allStudentRecords.length}건)` },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setRangeFilter(f.id as PrintRangeFilter)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold whitespace-nowrap transition-all ${
+                  rangeFilter === f.id
+                    ? 'bg-orange-600 text-white font-bold shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-[11px] text-slate-500 whitespace-nowrap">
+            총 {allStudentRecords.length}건 중 <strong className="text-orange-600 font-bold">{displayedRecords.length}건</strong> 출력 선택됨
+          </span>
         </div>
 
         {/* Printable Paper Area (A4 layout) */}
@@ -168,46 +224,63 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
 
             {/* Section 2: Chronological Timeline Log */}
             <div className="mt-6">
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 border-l-4 border-orange-500 pl-2">
-                2. 일시별 세부 지도 기록 타임라인 ({studentRecords.length}건)
-              </h3>
-              {studentRecords.length === 0 ? (
+              <div className="flex items-center justify-between mb-2 border-l-4 border-orange-500 pl-2">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  2. 일시별 세부 지도 기록 타임라인 ({displayedRecords.length}건
+                  {displayedRecords.length < allStudentRecords.length ? ` / 총 ${allStudentRecords.length}건 중 발췌` : ''})
+                </h3>
+                {displayedRecords.length < allStudentRecords.length && (
+                  <span className="text-[10px] text-slate-500">
+                    ※ 지면 최적화를 위한 최근 주요 지도 사례 발췌본
+                  </span>
+                )}
+              </div>
+
+              {displayedRecords.length === 0 ? (
                 <div className="p-4 text-center text-xs text-slate-400 border border-slate-200 rounded-lg">
-                  기록된 지도 내역이 없습니다.
+                  선택된 조건에 해당하는 지도 내역이 없습니다.
                 </div>
               ) : (
-                <table className="w-full text-xs border border-slate-300 border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-300 text-slate-700">
-                      <th className="p-2 border-r border-slate-300 text-left w-32">발생 일시</th>
-                      <th className="p-2 border-r border-slate-300 text-center w-16">교시</th>
-                      <th className="p-2 border-r border-slate-300 text-left w-36">분류 태그</th>
-                      <th className="p-2 border-r border-slate-300 text-left">발생 문제행동 관찰 상세</th>
-                      <th className="p-2 text-left">교사 지도 및 조치 사항</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {studentRecords.map((r, i) => (
-                      <tr key={r.id}>
-                        <td className="p-2 border-r border-slate-300 font-mono text-[11px]">
-                          {formatKoreanDateTime(r.timestamp)}
-                        </td>
-                        <td className="p-2 border-r border-slate-300 text-center font-medium">
-                          {r.period}
-                        </td>
-                        <td className="p-2 border-r border-slate-300 font-bold text-slate-800">
-                          {r.behaviorTag}
-                        </td>
-                        <td className="p-2 border-r border-slate-300 text-slate-800 font-medium">
-                          {r.rawSummary}
-                        </td>
-                        <td className="p-2 text-indigo-900 bg-indigo-50/20 font-medium">
-                          {r.actionTaken || '구두 주의 및 규칙 지도'}
-                        </td>
+                <>
+                  <table className="w-full text-xs border border-slate-300 border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-300 text-slate-700">
+                        <th className="p-2 border-r border-slate-300 text-left w-32">발생 일시</th>
+                        <th className="p-2 border-r border-slate-300 text-center w-16">교시</th>
+                        <th className="p-2 border-r border-slate-300 text-left w-36">분류 태그</th>
+                        <th className="p-2 border-r border-slate-300 text-left">발생 문제행동 관찰 상세</th>
+                        <th className="p-2 text-left">교사 지도 및 조치 사항</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {displayedRecords.map((r) => (
+                        <tr key={r.id}>
+                          <td className="p-2 border-r border-slate-300 font-mono text-[11px]">
+                            {formatKoreanDateTime(r.timestamp)}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 text-center font-medium">
+                            {r.period}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 font-bold text-slate-800">
+                            {r.behaviorTag}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 text-slate-800 font-medium">
+                            {r.rawSummary}
+                          </td>
+                          <td className="p-2 text-indigo-900 bg-indigo-50/20 font-medium">
+                            {r.actionTaken || '구두 주의 및 규칙 지도'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {displayedRecords.length < allStudentRecords.length && (
+                    <div className="mt-2 rounded bg-slate-50 border border-slate-200 p-2 text-[10px] text-slate-500">
+                      💡 <strong>안내</strong>: 본 상담 보고서는 상담 효율 및 지면 분량 최적화(A4 1~2장 맞춤)를 위해 최근 {displayedRecords.length}건을 우선 발췌 기재하였습니다. 학생의 전체 누적 횟수는 상단 <strong>[1. 표준 행동 유형별 누적 발생 빈도]</strong>에 전수 반영되어 있습니다.
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
