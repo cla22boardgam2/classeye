@@ -13,7 +13,7 @@ import { PrintReportModal } from '@/components/PrintReportModal';
 import { AnalyticsModal } from '@/components/AnalyticsModal';
 import { UnmatchedStudentModal } from '@/components/UnmatchedStudentModal';
 
-import { AppSettings, BehaviorRecord, Student, StudentBehaviorCounter } from '@/types';
+import { AppSettings, BehaviorRecord, Student, StudentBehaviorCounter, DateFilterType } from '@/types';
 import {
   calculateStudentCounters,
   getStoredRecords,
@@ -26,6 +26,7 @@ import {
   INITIAL_SAMPLE_RECORDS,
 } from '@/lib/storage';
 import { DEFAULT_APP_SETTINGS, DEFAULT_STUDENTS } from '@/lib/constants';
+import { filterRecordsByDateRange, getKoreanDateString } from '@/lib/timeHelper';
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -38,6 +39,10 @@ export default function HomePage() {
 
   // View Modes: Card Grid ('grid') vs Matrix Heatmap ('matrix') vs Seating Chart ('seating')
   const [viewMode, setViewMode] = useState<'grid' | 'matrix' | 'seating'>('grid');
+
+  // Matrix View Date Filter state
+  const [matrixDateFilter, setMatrixDateFilter] = useState<DateFilterType>('all');
+  const [matrixCustomDate, setMatrixCustomDate] = useState<string>('');
 
   // Privacy Protection Mode (Screen Masking for student names)
   const [isPrivacyMode, setIsPrivacyMode] = useState(false);
@@ -68,6 +73,7 @@ export default function HomePage() {
     setStudents(getStoredStudents());
     setRecords(getStoredRecords());
     setSettings(getStoredSettings());
+    setMatrixCustomDate(getKoreanDateString(new Date()));
     setMounted(true);
   }, []);
 
@@ -91,6 +97,15 @@ export default function HomePage() {
   const counters: StudentBehaviorCounter[] = useMemo(() => {
     return calculateStudentCounters(students, records, appMode);
   }, [students, records, appMode]);
+
+  // Filtered records and counters specifically for Matrix View's date filter
+  const matrixFilteredRecords = useMemo(() => {
+    return filterRecordsByDateRange(records, matrixDateFilter, matrixCustomDate);
+  }, [records, matrixDateFilter, matrixCustomDate]);
+
+  const matrixCounters = useMemo(() => {
+    return calculateStudentCounters(students, matrixFilteredRecords, appMode);
+  }, [students, matrixFilteredRecords, appMode]);
 
   // Map studentId -> { tag: count } for quick O(1) lookup
   const studentCountersMap = useMemo(() => {
@@ -326,12 +341,21 @@ export default function HomePage() {
 
           {viewMode === 'matrix' && (
             <MatrixHeatmapView
-              counters={counters}
+              counters={matrixCounters}
               settings={settings}
               onOpenDetail={handleOpenDetail}
               onAdjustCount={handleAdjustCount}
               isPrivacyMode={isPrivacyMode}
               appMode={appMode}
+              dateFilterType={matrixDateFilter}
+              onDateFilterChange={setMatrixDateFilter}
+              customDate={matrixCustomDate}
+              onCustomDateChange={setMatrixCustomDate}
+              totalFilteredRecords={
+                matrixFilteredRecords.filter((r) =>
+                  appMode === 'praise' ? r.recordType === 'praise' : r.recordType !== 'praise'
+                ).length
+              }
             />
           )}
 

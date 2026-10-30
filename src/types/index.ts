@@ -76,3 +76,12 @@ export interface AppSettings {
   periodSchedule: PeriodScheduleItem[];
   customTags: string[];
 }
+
+export type DateFilterType =
+  | 'all'
+  | 'today'
+  | 'yesterday'
+  | 'this_week'
+  | 'this_month'
+  | 'custom_day';
+

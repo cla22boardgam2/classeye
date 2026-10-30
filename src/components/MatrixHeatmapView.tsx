@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { AppSettings, StudentBehaviorCounter } from '@/types';
+import { AppSettings, StudentBehaviorCounter, DateFilterType } from '@/types';
 import { STANDARD_BEHAVIOR_TAGS, STANDARD_PRAISE_TAGS } from '@/lib/constants';
-import { getBehaviorIcon, ChevronRight } from './icons';
+import { getBehaviorIcon, ChevronRight, Calendar } from './icons';
 import { maskStudentName } from '@/lib/storage';
 
 interface MatrixHeatmapViewProps {
@@ -13,6 +13,11 @@ interface MatrixHeatmapViewProps {
   onAdjustCount: (studentId: string, behaviorTag: string, delta: number) => void;
   isPrivacyMode?: boolean;
   appMode?: 'guidance' | 'praise';
+  dateFilterType?: DateFilterType;
+  onDateFilterChange?: (filterType: DateFilterType) => void;
+  customDate?: string;
+  onCustomDateChange?: (date: string) => void;
+  totalFilteredRecords?: number;
 }
 
 export const MatrixHeatmapView: React.FC<MatrixHeatmapViewProps> = ({
@@ -22,6 +27,11 @@ export const MatrixHeatmapView: React.FC<MatrixHeatmapViewProps> = ({
   onAdjustCount,
   isPrivacyMode = false,
   appMode = 'guidance',
+  dateFilterType = 'all',
+  onDateFilterChange,
+  customDate = '',
+  onCustomDateChange,
+  totalFilteredRecords,
 }) => {
   // Sort students strictly by student number for clear matrix readability
   const sortedCounters = [...counters].sort((a, b) => a.student.number - b.student.number);
@@ -81,6 +91,81 @@ export const MatrixHeatmapView: React.FC<MatrixHeatmapViewProps> = ({
                 </span>
               </div>
             </>
+          )}
+        </div>
+      </div>
+
+      {/* Date Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5 text-xs dark:border-slate-800/80 dark:bg-slate-850">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="flex items-center gap-1 font-bold text-slate-700 dark:text-slate-300 mr-1 whitespace-nowrap">
+            <Calendar size={13} className="text-indigo-600" />
+            조회 기간:
+          </span>
+          {[
+            { id: 'all', label: '전체 누적' },
+            { id: 'today', label: '오늘' },
+            { id: 'yesterday', label: '어제' },
+            { id: 'this_week', label: '이번 주' },
+            { id: 'this_month', label: '이번 달' },
+          ].map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => onDateFilterChange?.(f.id as DateFilterType)}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold whitespace-nowrap transition-all ${
+                dateFilterType === f.id
+                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+
+          {/* Custom Date Picker */}
+          <div className="flex items-center gap-1 ml-1 sm:ml-2 whitespace-nowrap">
+            <span className="text-slate-400 text-[11px]">날짜 직접 지정:</span>
+            <input
+              type="date"
+              value={customDate}
+              onChange={(e) => {
+                onCustomDateChange?.(e.target.value);
+                onDateFilterChange?.('custom_day');
+              }}
+              className={`rounded-lg border px-2 py-0.5 text-xs font-semibold shadow-2xs focus:outline-none dark:bg-slate-800 dark:text-white ${
+                dateFilterType === 'custom_day'
+                  ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900'
+                  : 'border-slate-300 bg-white text-slate-700 dark:border-slate-700'
+              }`}
+            />
+          </div>
+        </div>
+
+        {/* Selected Date Summary Badge */}
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <span className="rounded-full bg-slate-200/80 px-2.5 py-0.5 text-[11px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+            {dateFilterType === 'all'
+              ? '전체 기간 집계'
+              : dateFilterType === 'today'
+              ? '오늘 집계'
+              : dateFilterType === 'yesterday'
+              ? '어제 집계'
+              : dateFilterType === 'this_week'
+              ? '이번 주 집계'
+              : dateFilterType === 'this_month'
+              ? '이번 달 집계'
+              : `${customDate} 집계`}
+            {totalFilteredRecords !== undefined && ` (${totalFilteredRecords}건)`}
+          </span>
+          {dateFilterType !== 'all' && (
+            <button
+              type="button"
+              onClick={() => onDateFilterChange?.('all')}
+              className="text-[11px] text-slate-400 hover:text-rose-500 underline"
+            >
+              전체 리셋
+            </button>
           )}
         </div>
       </div>

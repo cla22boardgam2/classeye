@@ -1,9 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Sparkles, Clock, RefreshCw, AlertTriangle, Undo2, Check } from './icons';
+import { Send, Sparkles, Clock, RefreshCw, AlertTriangle, Undo2, Check, Calendar } from './icons';
 import { AppSettings, BehaviorRecord, Student } from '@/types';
-import { getCurrentPeriodFromSchedule } from '@/lib/timeHelper';
+import {
+  getCurrentPeriodFromSchedule,
+  getKoreanDateString,
+  getYesterdayDateString,
+  extractDateFromText,
+  formatKoreanOnlyDate,
+} from '@/lib/timeHelper';
 import { mockClassifyText, openAIClassifyText, ParseResult } from '@/lib/classifier';
 import { COMMON_GUIDANCE_ACTIONS } from '@/lib/constants';
 
@@ -30,6 +36,7 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
 }) => {
   const [inputText, setInputText] = useState('');
   const [selectedActionTaken, setSelectedActionTaken] = useState<string>('');
+  const [recordDate, setRecordDate] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentAutoPeriod, setCurrentAutoPeriod] = useState('수업 중');
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
@@ -41,6 +48,11 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
   } | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Set today's date on mount
+  useEffect(() => {
+    setRecordDate(getKoreanDateString(new Date()));
+  }, []);
 
   // Update current period dynamically
   useEffect(() => {
@@ -74,9 +86,14 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
     try {
       let result: ParseResult;
 
+      // Extract date from text if mentioned (e.g. "어제 3번 철수 복도에서 뜀", "10월 28일 5번 영희...")
+      const { dateStr: naturalDate, cleanText } = extractDateFromText(text);
+      const effectiveDate = naturalDate || recordDate;
+      const textToClassify = cleanText || text;
+
       if (!settings.useMockParser && settings.apiKey) {
         result = await openAIClassifyText(
-          text,
+          textToClassify,
           students,
           activePeriod,
           settings.apiKey,
@@ -84,7 +101,7 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
           appMode
         );
       } else {
-        result = mockClassifyText(text, students, activePeriod, appMode);
+        result = mockClassifyText(textToClassify, students, activePeriod, appMode);
       }
 
       if (!result.success || result.items.length === 0) {
@@ -107,6 +124,16 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
       const newRecords: BehaviorRecord[] = [];
       const toastAnnouncements: string[] = [];
 
+      // Calculate effective timestamp
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      let effectiveTimestamp = new Date().toISOString();
+      try {
+        effectiveTimestamp = new Date(`${effectiveDate}T${timeStr}`).toISOString();
+      } catch (e) {
+        effectiveTimestamp = new Date().toISOString();
+      }
+
       for (const item of result.items) {
         let matchedStudent: Student | undefined;
         if (item.studentNumber) {
@@ -123,19 +150,22 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
             studentNumber: matchedStudent.number,
             studentName: matchedStudent.name,
             behaviorTag: item.behaviorTag,
-            rawSummary: item.rawSummary || text,
+            rawSummary: item.rawSummary || textToClassify,
             actionTaken: selectedActionTaken || item.actionTaken || (appMode === 'praise' ? '교사 칭찬 및 격려' : '구두 주의 및 규칙 지도'),
             period: item.period || activePeriod,
             recordType: appMode,
-            timestamp: new Date().toISOString(),
+            timestamp: effectiveTimestamp,
           };
           newRecords.push(rec);
 
           const currentCount =
             (studentCountersMap[matchedStudent.id]?.[item.behaviorTag] || 0) + 1;
 
+          const isToday = effectiveDate === getKoreanDateString(new Date());
+          const datePrefix = isToday ? '' : `[${effectiveDate}] `;
+
           toastAnnouncements.push(
-            `${matchedStudent.name} - [${item.behaviorTag}] 누적 ${currentCount}회째 기록되었습니다.`
+            `${datePrefix}${matchedStudent.name} - [${item.behaviorTag}] 누적 ${currentCount}회째 기록되었습니다.`
           );
         }
       }
@@ -188,36 +218,76 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
         }`}
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          {/* Header row with Period badge & Quick Chips */}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
-              <span className="flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                <Clock size={14} className={appMode === 'praise' ? 'text-emerald-500' : 'text-orange-500'} />
-                적용 교시:
-              </span>
-              <span
-                className={`rounded-md px-2 py-0.5 font-bold whitespace-nowrap ${
-                  appMode === 'praise'
-                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                    : 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300'
-                }`}
-              >
-                {activePeriod}
-              </span>
-              {selectedPeriod && (
+          {/* Header row with Date selector, Period badge & Quick Chips */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            {/* Left side: Date Picker & Period Badge */}
+            <div className="flex flex-wrap items-center gap-3 shrink-0">
+              {/* Record Date Picker */}
+              <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                <span className="flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-300">
+                  <Calendar size={13} className="text-indigo-500" />
+                  기록 날짜:
+                </span>
+                <input
+                  type="date"
+                  value={recordDate}
+                  onChange={(e) => setRecordDate(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-0.5 text-xs font-bold text-slate-800 shadow-2xs focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
                 <button
                   type="button"
-                  onClick={() => setSelectedPeriod(null)}
-                  className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline whitespace-nowrap"
+                  onClick={() => setRecordDate(getKoreanDateString(new Date()))}
+                  className={`rounded-md px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    recordDate === getKoreanDateString(new Date())
+                      ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                  }`}
                 >
-                  현재 시간으로 리셋
+                  오늘
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setRecordDate(getYesterdayDateString())}
+                  className={`rounded-md px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    recordDate === getYesterdayDateString()
+                      ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                  }`}
+                >
+                  어제
+                </button>
+              </div>
+
+              {/* Period Badge */}
+              <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                <span className="flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                  <Clock size={13} className={appMode === 'praise' ? 'text-emerald-500' : 'text-orange-500'} />
+                  교시:
+                </span>
+                <span
+                  className={`rounded-md px-2 py-0.5 font-bold whitespace-nowrap ${
+                    appMode === 'praise'
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300'
+                  }`}
+                >
+                  {activePeriod}
+                </span>
+                {selectedPeriod && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPeriod(null)}
+                    className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline whitespace-nowrap"
+                  >
+                    현재 시간 리셋
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Quick Period Selector Chips */}
             <div className="flex flex-wrap items-center gap-1 shrink-0">
-              <span className="text-slate-400 whitespace-nowrap">교시 직접지정:</span>
+              <span className="text-slate-400 whitespace-nowrap text-[11px]">교시 직접지정:</span>
               {quickPeriodChips.map((chip) => (
                 <button
                   key={chip}
